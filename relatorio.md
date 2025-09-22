@@ -5,7 +5,7 @@
 - **📘 Disciplina:** Laboratório de Experimentação de Software  
 - **🗓 Período:** 6° Período  
 - **👨‍🏫 Professor:** Prof. Dr. João Paulo Carneiro Aramuni  
-- **👥 Membros do Grupo:** [Preencher com nomes dos integrantes]  
+- **👥 Membros do Grupo:** Matheus Hoske Aguiar, Ryan Cristian Oliveira Rezende, Samuel Almeida Pinheiro, Thiago Vitor Pereira Perdigao
 
 ---
 
