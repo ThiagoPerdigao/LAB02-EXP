@@ -1,0 +1,190 @@
+{
+  "sample_size": 564,
+  "quality_metrics": [
+    "cbo_mean",
+    "wmc_mean",
+    "loc_mean",
+    "fanout_sum",
+    "fanin_sum"
+  ],
+  "process_metrics": [
+    "stars",
+    "age_years",
+    "releases_count",
+    "loc_sum"
+  ],
+  "quality_stats": {
+    "cbo_mean": {
+      "count": 564.0,
+      "mean": 4.983637903135559,
+      "std": 3.9585126468204623,
+      "min": 0.0,
+      "25%": 2.031539556880053,
+      "50%": 3.853481723229782,
+      "75%": 7.630258381379458,
+      "max": 51.84238825415915
+    },
+    "wmc_mean": {
+      "count": 564.0,
+      "mean": 6.215232064205085,
+      "std": 7.027609310653631,
+      "min": 1.0,
+      "25%": 1.8190963085482295,
+      "50%": 3.0804325285142946,
+      "75%": 8.793831168831169,
+      "max": 99.66666666666669
+    },
+    "loc_mean": {
+      "count": 564.0,
+      "mean": 29.159723931199757,
+      "std": 32.03199173317849,
+      "min": 2.6666666666666665,
+      "25%": 7.360757403858877,
+      "50%": 13.451068209241253,
+      "75%": 44.55863683662851,
+      "max": 406.3333333333333
+    },
+    "fanout_sum": {
+      "count": 564.0,
+      "mean": 29861.040780141844,
+      "std": 431293.35515882506,
+      "min": 0.0,
+      "25%": 452.5,
+      "50%": 2319.0,
+      "75%": 7339.5,
+      "max": 10222490.0
+    },
+    "fanin_sum": {
+      "count": 564.0,
+      "mean": 5098.2943262411345,
+      "std": 12485.659710523969,
+      "min": 0.0,
+      "25%": 253.0,
+      "50%": 1079.0,
+      "75%": 3611.75,
+      "max": 123177.0
+    }
+  },
+  "significant_correlations": [
+    {
+      "relationship": "maturity_age_years_cbo_mean",
+      "pearson": [
+        -0.10128438645026352,
+        0.016118335281708755
+      ],
+      "spearman": [
+        -0.1034603571491374,
+        0.013963694338699532
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "maturity_age_years_wmc_mean",
+      "pearson": [
+        -0.07852195920848717,
+        0.06238715503623685
+      ],
+      "spearman": [
+        -0.09269878408384963,
+        0.027712552673506235
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "maturity_age_years_loc_mean",
+      "pearson": [
+        -0.09309349878071277,
+        0.027053441888602814
+      ],
+      "spearman": [
+        -0.10473617726057947,
+        0.012821975711804788
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "activity_releases_count_wmc_mean",
+      "pearson": [
+        0.07928688972434336,
+        0.059870639689893236
+      ],
+      "spearman": [
+        0.08713781461123471,
+        0.03856921208240689
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "activity_releases_count_loc_mean",
+      "pearson": [
+        0.08619503987725989,
+        0.04072815052813114
+      ],
+      "spearman": [
+        0.08557513602711671,
+        0.0422026930647001
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "size_loc_sum_cbo_mean",
+      "pearson": [
+        0.2579304352105232,
+        5.053832955115112e-10
+      ],
+      "spearman": [
+        0.24327475092732154,
+        4.833928961068545e-09
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "size_loc_sum_wmc_mean",
+      "pearson": [
+        0.045113180077399936,
+        0.2848235686073021
+      ],
+      "spearman": [
+        0.1543398280748142,
+        0.00023387099392684828
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "size_loc_sum_loc_mean",
+      "pearson": [
+        0.07748881620531255,
+        0.06592394979642553
+      ],
+      "spearman": [
+        0.1686515605352303,
+        5.6918469863901374e-05
+      ],
+      "strength": "Muito fraca"
+    },
+    {
+      "relationship": "size_loc_sum_fanout_sum",
+      "pearson": [
+        0.3886319383726112,
+        8.936663665485832e-22
+      ],
+      "spearman": [
+        0.9603731837230302,
+        5.3274997683e-314
+      ],
+      "strength": "Forte"
+    },
+    {
+      "relationship": "size_loc_sum_fanin_sum",
+      "pearson": [
+        0.8005673892142777,
+        4.323260080162735e-127
+      ],
+      "spearman": [
+        0.9344522359595492,
+        3.4023240470497244e-254
+      ],
+      "strength": "Forte"
+    }
+  ]
+}

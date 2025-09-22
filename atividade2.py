@@ -1,56 +1,52 @@
 #!/usr/bin/env python3
 """
-lab02s01_automacao.py
+lab02s02_automacao.py
 
-Automação para Lab02S01:
+Automação Sprint 2 (Lab02S02):
  - Busca os top-1000 repositórios Java no GitHub (por estrelas)
  - Salva lista em lab02_repos.csv
- - Clona 1 repositório de exemplo (primeiro da lista) em clones/
- - Baixa/compila CK (se necessário) e roda CK no repositório clonado
- - Salva resultados CK em lab02_ck_results/<repo>/
+ - Baixa cada repositório como ZIP em clones/
+ - Baixa/compila CK (se necessário) e roda CK em cada repositório
+ - Consolida resultados CK em lab02_ck_all.csv
 
 Requisitos:
  - Python 3.7+
- - git no PATH
  - java (8+) no PATH
  - maven (se quiser que o script construa o JAR do CK automaticamente)
  - Definir GITHUB_TOKEN environment variable (ou editar TOKEN abaixo)
-
-Uso:
-  export GITHUB_TOKEN="ghp_..."   # ou no Windows setx ...
-  python lab02s01_automacao.py
 """
 
 import os
 import sys
 import time
-import json
 import subprocess
 import shutil
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from io import BytesIO
 
 import requests
 import pandas as pd
 
 # -----------------------
-# CONFIGURAÇÕES (edite se quiser)
+# CONFIGURAÇÕES
 # -----------------------
-TOKEN = "key"  # substitua ou defina GITHUB_TOKEN
+TOKEN = "" # substitua ou defina GITHUB_TOKEN
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 OUTPUT_REPOS_CSV = "lab02_repos.csv"
 CLONES_DIR = Path("clones")
 CK_REPO_DIR = Path("ck_tool")
 CK_OUTPUT_BASE = Path("lab02_ck_results")
-CK_LOCAL_JAR = CK_REPO_DIR / "target"  # a pasta onde o jar costuma ficar
-CK_JAR_GLOB = "ck-*-jar-with-dependencies.jar"  # padrão de nome após build
-PER_PAGE = 50    # resultados por página (max 100). 50 é OK para rate-limit.
+CK_LOCAL_JAR = CK_REPO_DIR / "target"
+CK_JAR_GLOB = "ck-*-jar-with-dependencies.jar"
+PER_PAGE = 50
 TOTAL_REPOS = 1000
-SLEEP_BETWEEN_PAGES = 1.0  # segundos
-CLONE_DEPTH = 1  # use shallow clone para economizar espaço; boa para análise de fontes
+SLEEP_BETWEEN_PAGES = 1.0
+CONSOLIDATED_CSV = "lab02_ck_all.csv"
 # -----------------------
 
-if TOKEN == "sua_token_aqui" or not TOKEN:
+if TOKEN == "sua_token_aqui" or not TOKEN or TOKEN == "key":
     print("⚠️  Atenção: você deve definir um token do GitHub. Exporte GITHUB_TOKEN ou edite TOKEN no script.")
     sys.exit(1)
 
@@ -67,8 +63,6 @@ def graphql_query(query: str, max_retries: int = 3, backoff: float = 5.0):
         if resp.status_code == 200:
             data = resp.json()
             if "errors" in data:
-                print("Erro no GraphQL:", data["errors"])
-                # Em caso de erro de paginação ou permission, abortamos
                 raise RuntimeError(f"GraphQL errors: {data['errors']}")
             return data
         elif resp.status_code == 502 and attempt < max_retries:
@@ -77,7 +71,6 @@ def graphql_query(query: str, max_retries: int = 3, backoff: float = 5.0):
         elif resp.status_code == 401:
             raise RuntimeError("401 Unauthorized — verifique seu token do GitHub.")
         else:
-            # para 403 rate limit, esperar um pouco e tentar novamente
             print("Resposta:", resp.text[:400])
             time.sleep(backoff)
     raise RuntimeError("Falha ao executar GraphQL após múltiplas tentativas.")
@@ -109,9 +102,6 @@ def fetch_top_java_repos(total=1000, per_page=50):
                   stargazerCount
                   primaryLanguage {{ name }}
                   releases {{ totalCount }}
-                  pullRequests(states: MERGED) {{ totalCount }}
-                  issues {{ totalCount }}
-                  closedIssues: issues(states: CLOSED) {{ totalCount }}
                 }}
               }}
             }}
@@ -128,7 +118,6 @@ def fetch_top_java_repos(total=1000, per_page=50):
         data = graphql_query(query)
         search = data.get("data", {}).get("search")
         if not search:
-            print("⚠️ 'search' não retornado pelo GraphQL. Saindo.")
             break
 
         edges = search.get("edges", [])
@@ -143,7 +132,6 @@ def fetch_top_java_repos(total=1000, per_page=50):
         cursor = page_info.get("endCursor")
         has_next = page_info.get("hasNextPage", False)
 
-        # informe rate-limit (opcional)
         rl = data.get("data", {}).get("rateLimit")
         if rl:
             print(f"RateLimit remaining: {rl.get('remaining')} resetAt: {rl.get('resetAt')}")
@@ -151,7 +139,6 @@ def fetch_top_java_repos(total=1000, per_page=50):
         print(f"Página {page}: coletados até agora {collected}/{total}")
         page += 1
         if not has_next:
-            print("Sem mais páginas disponíveis.")
             break
         time.sleep(SLEEP_BETWEEN_PAGES)
 
@@ -159,57 +146,39 @@ def fetch_top_java_repos(total=1000, per_page=50):
 
 
 def save_repos_csv(repos, filename=OUTPUT_REPOS_CSV):
-    df = pd.DataFrame([{
-        "nameWithOwner": r.get("nameWithOwner"),
-        "url": r.get("url"),
-        "createdAt": r.get("createdAt"),
-        "updatedAt": r.get("updatedAt"),
-        "stargazers": r.get("stargazerCount"),
-        "primaryLanguage": (r.get("primaryLanguage") or {}).get("name"),
-        "releases": (r.get("releases") or {}).get("totalCount"),
-        "mergedPullRequests": (r.get("pullRequests") or {}).get("totalCount"),
-        "issues": (r.get("issues") or {}).get("totalCount"),
-        "closedIssues": (r.get("closedIssues") or {}).get("totalCount"),
-    } for r in repos])
-    # calcular idade em anos
-    def idade_anos(iso):
-        try:
-            created = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-            delta = datetime.now(timezone.utc) - created
-            return round(delta.total_seconds() / (3600 * 24 * 365), 2)
-        except Exception:
-            return None
-
-    df["age_years"] = df["createdAt"].apply(idade_anos)
+    df = pd.DataFrame(repos)
     df.to_csv(filename, index=False, encoding="utf-8")
     print(f"✅ Lista de repositórios salva em {filename} ({len(df)} linhas)")
 
 
-def git_clone_repo(repo_full_name, dest_dir: Path, depth=1):
-    repo_url = f"https://github.com/{repo_full_name}.git"
+def download_repo_zip(repo_full_name, dest_dir: Path):
+    """Baixa o repositório como ZIP usando a branch padrão do GitHub."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / repo_full_name.replace("/", "_")
     if target.exists():
-        print(f"Repositório {repo_full_name} já clonado em {target}, pulando clone.")
+        print(f"Repositório {repo_full_name} já baixado em {target}, pulando download.")
         return target
-    cmd = ["git", "clone", "--depth", str(depth), repo_url, str(target)]
-    print("Executando:", " ".join(cmd))
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Falha ao clonar {repo_full_name}: {e}")
+
+    # Consulta a API para descobrir a branch padrão
+    api_url = f"https://api.github.com/repos/{repo_full_name}"
+    resp = requests.get(api_url, headers=headers)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Falha ao obter info de {repo_full_name} ({resp.status_code})")
+    default_branch = resp.json().get("default_branch", "main")
+
+    zip_url = f"https://github.com/{repo_full_name}/archive/refs/heads/{default_branch}.zip"
+    print(f"Baixando ZIP de {repo_full_name} (branch padrão: {default_branch})...")
+    resp = requests.get(zip_url, headers=headers)
+    if resp.status_code != 200:
+        raise RuntimeError(f"Falha ao baixar {repo_full_name} ({resp.status_code})")
+    
+    with zipfile.ZipFile(BytesIO(resp.content)) as zf:
+        zf.extractall(target)
     return target
 
 
+
 def ensure_ck_is_built(ck_dir=CK_REPO_DIR):
-    """
-    Se a ferramenta CK não estiver compilada localmente, o script:
-      - clona https://github.com/mauricioaniche/ck em ck_dir (se necessário)
-      - tenta buildar com 'mvn clean package'
-      - procura o jar target/*jar-with-dependencies.jar
-    Retorna o caminho absoluto do JAR pronto para execução.
-    """
-    # 1) se jar já existe localmente (procura em ck_dir/target), usa ele
     if ck_dir.exists():
         target_dir = ck_dir / "target"
         if target_dir.exists():
@@ -218,110 +187,119 @@ def ensure_ck_is_built(ck_dir=CK_REPO_DIR):
                 print(f"Encontrado CK jar em {jars[0]}")
                 return jars[0].resolve()
 
-    # 2) clone o repo
     if not ck_dir.exists():
         print("Clonando CK (mauricioaniche/ck)...")
         subprocess.run(["git", "clone", "https://github.com/mauricioaniche/ck", str(ck_dir)], check=True)
 
-    # 3) tenta build com maven
     mvn_exists = shutil.which("mvn") is not None
     if not mvn_exists:
-        raise RuntimeError("Maven não encontrado no PATH. Instale Maven ou construa o JAR do CK manualmente (mvn clean package).")
+        raise RuntimeError("Maven não encontrado no PATH.")
 
-    print("Buildando CK via 'mvn clean package' (isso pode demorar um pouco)...")
+    print("Buildando CK via 'mvn clean package' ...")
     subprocess.run(["mvn", "clean", "package", "-DskipTests"], cwd=str(ck_dir), check=True)
 
-    # 4) procurar jar
     target_dir = ck_dir / "target"
     jars = list(target_dir.glob("ck-*-jar-with-dependencies.jar"))
     if not jars:
-        raise RuntimeError("JAR do CK não encontrado após build. Verifique o build do Maven.")
+        raise RuntimeError("JAR do CK não encontrado após build.")
     print(f"CK jar construído: {jars[0]}")
     return jars[0].resolve()
 
 
-def run_ck_on_project(ck_jar_path: Path, project_dir: Path, output_dir: Path, use_jars: bool = False):
-    """
-    Executa:
-      java -jar ck-...jar <project dir> <use jars:true|false> <max files per partition:0> <variables and fields?:true|false> <output dir>
-    """
+def run_ck_on_project(ck_jar_path: Path, project_dir: Path, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
-    use_jars_str = "true" if use_jars else "false"
-    max_files = "0"
-    variables_and_fields = "false"
     cmd = [
         "java", "-jar", str(ck_jar_path),
         str(project_dir),
-        use_jars_str,
-        max_files,
-        variables_and_fields,
+        "false",  # use jars
+        "0",      # max files
+        "false",  # variables and fields
         str(output_dir)
     ]
     print("Executando CK:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+
+def idade_anos(iso):
     try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Falha ao executar CK: {e}")
-    print(f"✅ CK finalizado. Resultados em {output_dir}")
+        created = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - created
+        return round(delta.total_seconds() / (3600 * 24 * 365), 2)
+    except Exception:
+        return None
 
 
-def gather_ck_sample_csv(output_dir: Path, sample_output_csv: Path):
-    """
-    O CK gera normalmente arquivos: "classes.csv", "methods.csv", "variables.csv".
-    Aqui copiamos classes.csv para sample_output_csv (ou combinamos se necessário).
-    """
-    classes_csv = output_dir / "classes.csv"
-    if not classes_csv.exists():
-        # tenta encontrar qualquer csv no output_dir
-        any_csvs = list(output_dir.glob("*.csv"))
-        if not any_csvs:
-            raise RuntimeError(f"Nenhum CSV gerado pelo CK em {output_dir}")
-        # pega o primeiro
-        classes_csv = any_csvs[0]
-    shutil.copy(str(classes_csv), str(sample_output_csv))
-    print(f"Arquivo de amostra do CK salvo em {sample_output_csv}")
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+def process_single_repo(repo, clones_dir, ck_output_base, ck_jar):
+    repo_full_name = repo["nameWithOwner"]
+    try:
+        cloned_path = download_repo_zip(repo_full_name, clones_dir)
+        # Ajusta para acessar a pasta descompactada
+        extracted_subdir = next(cloned_path.iterdir())
+        repo_safe_name = repo_full_name.replace("/", "_")
+        ck_result_dir = ck_output_base / repo_safe_name
+        run_ck_on_project(ck_jar, extracted_subdir, ck_result_dir)
+
+        classes_csv = ck_result_dir / "classes.csv"
+        if not classes_csv.exists():
+            print(f"⚠️ Nenhum classes.csv para {repo_full_name}, pulando.")
+            return None
+
+        df = pd.read_csv(classes_csv)
+
+        summary = {
+            "repo": repo_full_name,
+            "stars": repo.get("stargazerCount"),
+            "age_years": idade_anos(repo.get("createdAt")),
+            "releases": (repo.get("releases") or {}).get("totalCount"),
+            "CBO_mean": df["cbo"].mean(),
+            "CBO_std": df["cbo"].std(),
+            "DIT_mean": df["dit"].mean(),
+            "LCOM_mean": df["lcom"].mean(),
+        }
+        return summary
+    except Exception as e:
+        print(f"❌ Erro ao processar {repo_full_name}: {e}")
+        return None
+
+def process_all_repos_parallel(repos, clones_dir=CLONES_DIR, ck_output_base=CK_OUTPUT_BASE, ck_dir=CK_REPO_DIR, max_workers=4):
+    try:
+        ck_jar = ensure_ck_is_built(ck_dir)
+    except RuntimeError as e:
+        print("Erro ao preparar CK:", e)
+        return
+
+    results = []
+    total_repos = len(repos)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_repo = {executor.submit(process_single_repo, repo, clones_dir, ck_output_base, ck_jar): repo for repo in repos}
+
+        for i, future in enumerate(as_completed(future_to_repo), start=1):
+            repo = future_to_repo[future]
+            repo_full_name = repo["nameWithOwner"]
+            remaining = total_repos - i
+            print(f"[{i}/{total_repos}] Concluído {repo_full_name} — Faltam {remaining} repositórios...")
+            res = future.result()
+            if res:
+                results.append(res)
+
+    results_df = pd.DataFrame(results)
+    results_df.to_csv(CONSOLIDATED_CSV, index=False, encoding="utf-8")
+    print(f"\n✅ Arquivo consolidado salvo em {CONSOLIDATED_CSV}")
+
 
 
 def main():
-    print("=== Lab02S01: coletando top Java repos e rodando CK em 1 repositório (exemplo) ===")
-    print("1) Buscando lista de repositórios (pode demorar alguns minutos)...")
+    print("=== Lab02S02: Coleta CK em todos os repositórios ===")
     repos = fetch_top_java_repos(total=TOTAL_REPOS, per_page=PER_PAGE)
     if not repos:
-        print("⚠️ Nenhum repositório coletado. Abortando.")
+        print("Nenhum repositório coletado. Abortando.")
         return
     save_repos_csv(repos, OUTPUT_REPOS_CSV)
+    process_all_repos_parallel(repos, max_workers=4)
 
-    # clonando o primeiro repositório (exemplo)
-    first = repos[0]
-    repo_full_name = first["nameWithOwner"]
-    print(f"\n2) Clonando o repositório exemplo: {repo_full_name}")
-    cloned_path = git_clone_repo(repo_full_name, CLONES_DIR, depth=CLONE_DEPTH)
-    print("Clonado em:", cloned_path)
-
-    # prepara o CK (download/build)
-    print("\n3) Preparando CK (build se necessário)...")
-    try:
-        ck_jar = ensure_ck_is_built(CK_REPO_DIR)
-    except RuntimeError as e:
-        print("⚠️ Erro ao preparar CK:", e)
-        print("Se preferir, faça build manualmente: clone https://github.com/mauricioaniche/ck e rode 'mvn clean package', então atualize CK_REPO_DIR.")
-        return
-
-    # rodar CK no repositório clonado
-    repo_safe_name = repo_full_name.replace("/", "_")
-    ck_result_dir = CK_OUTPUT_BASE / repo_safe_name
-    print(f"\n4) Executando CK no repositório {repo_full_name} ...")
-    run_ck_on_project(ck_jar, cloned_path, ck_result_dir, use_jars=False)
-
-    # copiar o CSV de classes como amostra
-    sample_csv = Path(f"lab02_ck_sample_{repo_safe_name}.csv")
-    gather_ck_sample_csv(ck_result_dir, sample_csv)
-
-    print("\n=== FIM ===")
-    print(f"- Repositórios listados: {OUTPUT_REPOS_CSV}")
-    print(f"- Repositório clonado (exemplo): {cloned_path}")
-    print(f"- Resultados CK: {ck_result_dir}")
-    print(f"- Amostra CK (CSV): {sample_csv}")
 
 
 if __name__ == "__main__":
